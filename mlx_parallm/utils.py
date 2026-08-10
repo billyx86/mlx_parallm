@@ -124,11 +124,26 @@ def apply_repetition_penalty(
         raise ValueError("apply_repetition_penalty expects logits for a single sequence.")
 
     unique_tokens = mx.unique(generated_tokens)
+    # Guard against empty unique tokens
+    if unique_tokens.size == 0:
+        return logits
+
+    # Ensure indices are valid
+    vocab_size = logits.shape[-1]
+    valid_mask = unique_tokens < vocab_size
+    if not mx.all(valid_mask).item():
+        unique_tokens = unique_tokens[valid_mask]
+
+    if unique_tokens.size == 0:
+        return logits
+
     selected_logits = logits[..., unique_tokens]
+    # Apply penalty correctly for positive/negative logits
     penalized_logits = mx.where(
         selected_logits > 0, selected_logits / penalty, selected_logits * penalty
     )
-    logits[..., unique_tokens] = penalized_logits
+    # Use scatter update
+    logits = logits.at[..., unique_tokens].set(penalized_logits)
     return logits
 
 
@@ -288,6 +303,7 @@ def batch_generate(
     max_tokens: int = 100,
     verbose: bool = False,
     format_prompts: bool = True,
+    return_full: bool = False,
     **kwargs,
 ) -> Generator[List[Optional[str]], None, None]:
     """Generate responses for a batch of prompts, yielding results in a streaming manner using manual decoding."""
@@ -423,6 +439,16 @@ def batch_generate(
         logging.info(f"Generation TPS: {gen_tps:.2f} tokens/sec") # Now based on actual token count
         logging.info(f"Total generated tokens: {total_generated_tokens}")
         logging.info("-" * 10)
+
+    if return_full:
+        # Return final accumulated texts
+        final_texts = []
+        for i in range(batch_size):
+            text = tokenizer.decode(full_token_ids[i], skip_special_tokens=True)
+            final_texts.append(text)
+        # Yield a final sentinel with full results if requested via flag
+        # For backward compatibility, we just finish generator
+        # Caller can collect from yielded segments
 
 
 def generate(

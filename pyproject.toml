@@ -1,0 +1,30 @@
+[project]
+name = "mlx-parallm"
+version = "0.2.0"
+description = "Batched KV caching for fast parallel inference on Apple Silicon devices, via MLX"
+requires-python = ">=3.9"
+dependencies = [
+    "mlx>=0.18",
+    "mlx-lm>=0.18",
+    "huggingface-hub>=0.20",
+    "transformers>=4.40",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio",
+    "black",
+    "ruff",
+    "mypy",
+]
+
+[project.urls]
+Homepage = "https://github.com/billyx86/mlx_parallm"
+Repository = "https://github.com/billyx86/mlx_parallm"
+
+[tool.black]
+line-length = 100
+
+[tool.ruff]
+line-length = 100
