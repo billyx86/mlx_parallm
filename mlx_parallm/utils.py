@@ -19,7 +19,12 @@ from mlx.utils import tree_flatten
 from transformers import PreTrainedTokenizer
 
 # mlx_lm
-from mlx_lm.tokenizer_utils import TokenizerWrapper, load_tokenizer
+from mlx_lm.tokenizer_utils import TokenizerWrapper
+# `load_tokenizer` (the high-level loader that returns a TokenizerWrapper)
+# was moved out of mlx_lm.tokenizer_utils in mlx-lm >= 0.2x; it now lives in
+# mlx_lm.utils. Importing it from tokenizer_utils is an ImportError on
+# current mlx-lm (CI caught this on the revamp branch).
+from mlx_lm.utils import load_tokenizer
 try:
     from mlx_lm.lora import apply_lora_layers
 except ImportError:
@@ -27,7 +32,12 @@ except ImportError:
     def apply_lora_layers(model, adapter_path):
         raise NotImplementedError("LoRA adapter application function not found in installed mlx_lm version.")
 
-from mlx_lm.tuner.utils import dequantize as dequantize_model
+try:
+    from mlx_lm.tuner.utils import dequantize as dequantize_model
+except ImportError:
+    logging.warning("Could not import 'dequantize' from 'mlx_lm.tuner.utils'. The --dequantize conversion option will be unavailable.")
+    def dequantize_model(model):
+        raise NotImplementedError("Dequantization helper not found in installed mlx_lm version.")
 
 # Local imports
 from mlx_parallm.sample_utils import top_p_sampling
@@ -123,11 +133,27 @@ def apply_repetition_penalty(
     if logits.ndim > 1 and logits.shape[0] != 1:
         raise ValueError("apply_repetition_penalty expects logits for a single sequence.")
 
-    unique_tokens = mx.unique(generated_tokens)
+    # "Return the unique, in-vocab token ids" is a set op whose output shape
+    # depends on the data. MLX cannot express it in pure ops: there is no
+    # mx.unique, boolean-mask *gathering* (only boolean *assignment*) is
+    # unsupported, and there is no mx.nonzero. In mlx 0.3x there is also no
+    # mx.numpy() / array.numpy() host bridge, so the clean, version-proof path
+    # is to sync the small 1-D token array with .tolist() (a pure Python list),
+    # take the unique ids in Python, and convert back to an mx.array. The token
+    # count is tiny, so this sync is negligible next to the matmul.
+    vocab_size = logits.shape[-1]
+    unique_ids = sorted({int(t) for t in generated_tokens.tolist() if 0 <= t < vocab_size})
+    if not unique_ids:
+        return logits
+    unique_tokens = mx.array(unique_ids)
+
     selected_logits = logits[..., unique_tokens]
+    # Apply penalty correctly for positive/negative logits
     penalized_logits = mx.where(
         selected_logits > 0, selected_logits / penalty, selected_logits * penalty
     )
+    # Integer fancy-indexed in-place update (MLX supports indexed assignment;
+    # JAX-style .at[...].set() is not an MLX API).
     logits[..., unique_tokens] = penalized_logits
     return logits
 
@@ -288,6 +314,7 @@ def batch_generate(
     max_tokens: int = 100,
     verbose: bool = False,
     format_prompts: bool = True,
+    return_full: bool = False,
     **kwargs,
 ) -> Generator[List[Optional[str]], None, None]:
     """Generate responses for a batch of prompts, yielding results in a streaming manner using manual decoding."""
@@ -423,6 +450,16 @@ def batch_generate(
         logging.info(f"Generation TPS: {gen_tps:.2f} tokens/sec") # Now based on actual token count
         logging.info(f"Total generated tokens: {total_generated_tokens}")
         logging.info("-" * 10)
+
+    if return_full:
+        # Return final accumulated texts
+        final_texts = []
+        for i in range(batch_size):
+            text = tokenizer.decode(full_token_ids[i], skip_special_tokens=True)
+            final_texts.append(text)
+        # Yield a final sentinel with full results if requested via flag
+        # For backward compatibility, we just finish generator
+        # Caller can collect from yielded segments
 
 
 def generate(
