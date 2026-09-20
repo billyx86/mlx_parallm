@@ -134,24 +134,26 @@ def apply_repetition_penalty(
         raise ValueError("apply_repetition_penalty expects logits for a single sequence.")
 
     # "Return the unique, in-vocab token ids" is a set op whose output shape
-    # depends on the data. Pure MLX cannot express it: there is no mx.unique,
-    # boolean-mask *gathering* (only assignment) and mx.nonzero are all
-    # unsupported. The documented workaround (ml-explore/mlx#856) is to do the
-    # shape-dependent op on the small 1-D token array via numpy, then convert
-    # the result back. numpy is always present (transitively, via transformers).
-    import numpy as np
-    np_tokens = np.unique(mx.numpy(generated_tokens))
-    np_tokens = np_tokens[np_tokens < logits.shape[-1]]
-    if np_tokens.size == 0:
+    # depends on the data. MLX cannot express it in pure ops: there is no
+    # mx.unique, boolean-mask *gathering* (only boolean *assignment*) is
+    # unsupported, and there is no mx.nonzero. In mlx 0.3x there is also no
+    # mx.numpy() / array.numpy() host bridge, so the clean, version-proof path
+    # is to sync the small 1-D token array with .tolist() (a pure Python list),
+    # take the unique ids in Python, and convert back to an mx.array. The token
+    # count is tiny, so this sync is negligible next to the matmul.
+    vocab_size = logits.shape[-1]
+    unique_ids = sorted({int(t) for t in generated_tokens.tolist() if 0 <= t < vocab_size})
+    if not unique_ids:
         return logits
-    unique_tokens = mx.array(np_tokens)
+    unique_tokens = mx.array(unique_ids)
 
     selected_logits = logits[..., unique_tokens]
     # Apply penalty correctly for positive/negative logits
     penalized_logits = mx.where(
         selected_logits > 0, selected_logits / penalty, selected_logits * penalty
     )
-    # MLX in-place advanced assignment (JAX's .at[...].set is not an MLX API).
+    # Integer fancy-indexed in-place update (MLX supports indexed assignment;
+    # JAX-style .at[...].set() is not an MLX API).
     logits[..., unique_tokens] = penalized_logits
     return logits
 
