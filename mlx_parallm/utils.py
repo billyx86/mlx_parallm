@@ -123,6 +123,21 @@ def get_model_path(path_or_hf_repo: str, revision: Optional[str] = None) -> Path
     return model_path
 
 
+def _unique_sorted(x: mx.array) -> mx.array:
+    """Sorted unique values via sort + change-mask.
+
+    `mx.unique` was removed from the public mlx API in recent releases
+    (CI caught `module 'mlx.core' has no attribute 'unique'`), so compute it
+    with primitives that still exist. Input is a 1-D token array.
+    """
+    if x.size == 0:
+        return x
+    s = mx.sort(x)
+    changed = s[1:] != s[:-1]
+    mask = mx.concatenate([mx.ones((1,), mx.bool_), changed])
+    return s[mask]
+
+
 def apply_repetition_penalty(
     logits: mx.array, generated_tokens: mx.array, penalty: float
 ) -> mx.array:
@@ -133,7 +148,7 @@ def apply_repetition_penalty(
     if logits.ndim > 1 and logits.shape[0] != 1:
         raise ValueError("apply_repetition_penalty expects logits for a single sequence.")
 
-    unique_tokens = mx.unique(generated_tokens)
+    unique_tokens = _unique_sorted(generated_tokens)
     # Guard against empty unique tokens
     if unique_tokens.size == 0:
         return logits
