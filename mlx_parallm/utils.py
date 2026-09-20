@@ -123,21 +123,6 @@ def get_model_path(path_or_hf_repo: str, revision: Optional[str] = None) -> Path
     return model_path
 
 
-def _unique_sorted(x: mx.array) -> mx.array:
-    """Sorted unique values via sort + change-mask.
-
-    `mx.unique` was removed from the public mlx API in recent releases
-    (CI caught `module 'mlx.core' has no attribute 'unique'`), so compute it
-    with primitives that still exist. Input is a 1-D token array.
-    """
-    if x.size == 0:
-        return x
-    s = mx.sort(x)
-    changed = s[1:] != s[:-1]
-    mask = mx.concatenate([mx.ones((1,), mx.bool_), changed])
-    return s[mask]
-
-
 def apply_repetition_penalty(
     logits: mx.array, generated_tokens: mx.array, penalty: float
 ) -> mx.array:
@@ -148,27 +133,26 @@ def apply_repetition_penalty(
     if logits.ndim > 1 and logits.shape[0] != 1:
         raise ValueError("apply_repetition_penalty expects logits for a single sequence.")
 
-    unique_tokens = _unique_sorted(generated_tokens)
-    # Guard against empty unique tokens
-    if unique_tokens.size == 0:
+    # "Return the unique, in-vocab token ids" is a set op whose output shape
+    # depends on the data. Pure MLX cannot express it: there is no mx.unique,
+    # boolean-mask *gathering* (only assignment) and mx.nonzero are all
+    # unsupported. The documented workaround (ml-explore/mlx#856) is to do the
+    # shape-dependent op on the small 1-D token array via numpy, then convert
+    # the result back. numpy is always present (transitively, via transformers).
+    import numpy as np
+    np_tokens = np.unique(generated_tokens.numpy())
+    np_tokens = np_tokens[np_tokens < logits.shape[-1]]
+    if np_tokens.size == 0:
         return logits
-
-    # Ensure indices are valid
-    vocab_size = logits.shape[-1]
-    valid_mask = unique_tokens < vocab_size
-    if not mx.all(valid_mask).item():
-        unique_tokens = unique_tokens[valid_mask]
-
-    if unique_tokens.size == 0:
-        return logits
+    unique_tokens = mx.array(np_tokens)
 
     selected_logits = logits[..., unique_tokens]
     # Apply penalty correctly for positive/negative logits
     penalized_logits = mx.where(
         selected_logits > 0, selected_logits / penalty, selected_logits * penalty
     )
-    # Use scatter update
-    logits = logits.at[..., unique_tokens].set(penalized_logits)
+    # MLX in-place advanced assignment (JAX's .at[...].set is not an MLX API).
+    logits[..., unique_tokens] = penalized_logits
     return logits
 
 
