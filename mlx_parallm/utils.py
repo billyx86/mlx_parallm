@@ -32,7 +32,12 @@ except ImportError:
     def apply_lora_layers(model, adapter_path):
         raise NotImplementedError("LoRA adapter application function not found in installed mlx_lm version.")
 
-from mlx_lm.tuner.utils import dequantize as dequantize_model
+try:
+    from mlx_lm.tuner.utils import dequantize as dequantize_model
+except ImportError:
+    logging.warning("Could not import 'dequantize' from 'mlx_lm.tuner.utils'. The --dequantize conversion option will be unavailable.")
+    def dequantize_model(model):
+        raise NotImplementedError("Dequantization helper not found in installed mlx_lm version.")
 
 # Local imports
 from mlx_parallm.sample_utils import top_p_sampling
