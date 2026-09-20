@@ -140,7 +140,7 @@ def apply_repetition_penalty(
     # shape-dependent op on the small 1-D token array via numpy, then convert
     # the result back. numpy is always present (transitively, via transformers).
     import numpy as np
-    np_tokens = np.unique(generated_tokens.numpy())
+    np_tokens = np.unique(mx.numpy(generated_tokens))
     np_tokens = np_tokens[np_tokens < logits.shape[-1]]
     if np_tokens.size == 0:
         return logits
