@@ -19,7 +19,12 @@ from mlx.utils import tree_flatten
 from transformers import PreTrainedTokenizer
 
 # mlx_lm
-from mlx_lm.tokenizer_utils import TokenizerWrapper, load_tokenizer
+from mlx_lm.tokenizer_utils import TokenizerWrapper
+# `load_tokenizer` (the high-level loader that returns a TokenizerWrapper)
+# was moved out of mlx_lm.tokenizer_utils in mlx-lm >= 0.2x; it now lives in
+# mlx_lm.utils. Importing it from tokenizer_utils is an ImportError on
+# current mlx-lm (CI caught this on the revamp branch).
+from mlx_lm.utils import load_tokenizer
 try:
     from mlx_lm.lora import apply_lora_layers
 except ImportError:
