@@ -113,7 +113,7 @@ def test_batch_size_two_stored_independently():
     # batch 0 -> all 1s, batch 1 -> all 9s (built explicitly to avoid any
     # slice-assignment dependency).
     k = mx.array([[[[1.0, 1.0], [1.0, 1.0]]], [[[9.0, 9.0], [9.0, 9.0]]]])
-    v = k.copy()
+    v = mx.array([[[[1.0, 1.0], [1.0, 1.0]]], [[[9.0, 9.0], [9.0, 9.0]]]])
     rk, rv = cache.update_and_fetch(k, v)
 
     assert rk.shape == (2, 1, 2, 2)
