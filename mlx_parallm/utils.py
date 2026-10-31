@@ -315,9 +315,24 @@ def batch_generate(
     verbose: bool = False,
     format_prompts: bool = True,
     return_full: bool = False,
+    token_callback: Optional[Callable[[str, int], None]] = None,
     **kwargs,
 ) -> Generator[List[Optional[str]], None, None]:
-    """Generate responses for a batch of prompts, yielding results in a streaming manner using manual decoding."""
+    """Generate responses for a batch of prompts, yielding results in a streaming manner using manual decoding.
+
+    Args:
+        model: The loaded MLX model.
+        tokenizer: A ``TokenizerWrapper``.
+        prompts: List of prompt strings.
+        max_tokens: Maximum tokens to generate per prompt.
+        verbose: Log timing/throughput stats when True.
+        format_prompts: Apply the chat template before encoding.
+        return_full: Reserved (final text is always available from yields).
+        token_callback: Optional ``callback(token: str, prompt_index: int)``
+            invoked once per newly-decoded token (segment) for each prompt, in
+            generation order, enabling real-time streaming UI integration.
+            Defaults to ``None`` (original behavior, no callbacks).
+    """
     batch_size = len(prompts)
     if batch_size == 0:
         return
@@ -400,6 +415,8 @@ def batch_generate(
                         previous_texts[i] = current_text # Update previous text even on EOS
                         if segment:
                             current_step_segments[i] = segment
+                            if token_callback is not None:
+                                token_callback(segment, i)
                     else:
                         full_token_ids[i].append(token_id) # Add new token ID
                         # Decode full sequence and get new segment, skipping special tokens
@@ -415,6 +432,8 @@ def batch_generate(
                         previous_texts[i] = current_text # Update previous text
                         if segment:
                             current_step_segments[i] = segment
+                            if token_callback is not None:
+                                token_callback(segment, i)
 
             yield current_step_segments
 
