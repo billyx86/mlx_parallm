@@ -22,12 +22,19 @@ for r in responses[-1]:
     print(r)
 ```
 
-### CLI
+## CLI
 
 ```bash
-python -m mlx_parallm.cli --model google/gemma-1.1-2b-it --prompt "Hello" --max-tokens 100
-python -m mlx_parallm.cli --model google/gemma-1.1-2b-it --batch prompts.txt --max-tokens 128 --output results.json
+# Single prompt
+python -m mlx_parallm.cli --model google/gemma-1.1-2b-it --prompt "Hello world"
+
+# Batch: one prompt per line; blank lines are ignored
+python -m mlx_parallm.cli --model google/gemma-1.1-2b-it --batch prompts.txt --output out.json
 ```
+
+Prompt files are read as UTF-8 by default; a UTF-8 BOM is stripped when
+present. For files in another encoding, pass `--encoding` (e.g.
+`--encoding latin-1` or `--encoding utf-16`).
 
 ## Features
 
