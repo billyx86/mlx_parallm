@@ -40,6 +40,7 @@ present. For files in another encoding, pass `--encoding` (e.g.
 
 Supported:
 - `batch_generate` with streaming yields per step
+- Per-token streaming callback (`token_callback`) for real-time UI updates
 - Auto-padding with left padding
 - Auto-formatting with prompt templates (`format_prompts=True`)
 - Temperature sampling and nucleus sampling (`top_p`)
@@ -50,7 +51,6 @@ Supported:
 - Proper package layout with `pyproject.toml`
 
 Not yet supported:
-- Streaming outputs for `batch_generate` per-token callbacks (streaming per step is available)
 - Dynamic batching for async requests
 - Repetition penalties in single-stream mode (works in batch)
 
@@ -91,8 +91,18 @@ size tables (M1 through Ultra-class), and profiling recipes — is in
 ### `load(path_or_hf_repo, ...) -> (model, tokenizer)`
 Load model and tokenizer from local path or Hugging Face Hub.
 
-### `batch_generate(model, tokenizer, prompts, max_tokens=100, verbose=False, format_prompts=True, **kwargs)`
+### `batch_generate(model, tokenizer, prompts, max_tokens=100, verbose=False, format_prompts=True, token_callback=None, **kwargs)`
 Yields lists of partial strings per batch step. Use `list(...)` to collect final results.
+
+- **`token_callback(token: str, prompt_index: int) -> None`** (optional): called once per newly-decoded token/segment for each prompt, in generation order. Enables real-time streaming into a UI (e.g. append `token` to the line for `prompt_index`). Defaults to `None` — original behavior with no callbacks.
+
+```python
+def on_token(token, prompt_index):
+    print(f"[prompt {prompt_index}] {token}", end="", flush=True)
+
+for step in batch_generate(model, tokenizer, prompts, max_tokens=128, token_callback=on_token):
+    pass  # callback already fired per token
+```
 
 ### `generate(model, tokenizer, prompt, max_tokens=100, **kwargs) -> str`
 Single prompt generation.
