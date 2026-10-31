@@ -66,6 +66,26 @@ Float16 models perform fastest when RAM allows (~1300+ tok/s for gemma-2b on M3 
 
 Add new architectures by copying from `mlx_lm/models` and replacing `KVCache` with `BatchedKVCache`.
 
+## Memory & performance
+
+MLX shares the system's unified memory, so inference cost is dominated by
+**model weights** plus the **KV cache**. The KV cache is the part that
+scales with your workload:
+
+```
+kv_bytes ≈ 2 · batch_size · n_kv_heads · seq_len · head_dim · dtype_bytes
+```
+
+(`2` = keys + values; `dtype_bytes` is 2 for float16.) It grows linearly in
+both `batch_size` and `seq_len`, so a large batch of long prompts is the
+main memory risk. `BatchedKVCache` allocates the sequence dimension in
+256-token chunks and frees it with `.reset()`, so reuse one cache across
+runs rather than holding many.
+
+Full guidance — weight/KV-cache math with worked examples, per-chip batch
+size tables (M1 through Ultra-class), and profiling recipes — is in
+[MEMORY.md](MEMORY.md).
+
 ## API reference
 
 ### `load(path_or_hf_repo, ...) -> (model, tokenizer)`
