@@ -1,6 +1,7 @@
 """MLX ParaLLM - Fast parallel inference for MLX models."""
 
 import importlib
+from typing import Any, List
 
 __version__ = "0.2.0"
 __author__ = "Billy King"
@@ -29,7 +30,7 @@ _LAZY_IMPORTS = {
 }
 
 
-def __getattr__(name):
+def __getattr__(name: str) -> Any:
     module_name = _LAZY_IMPORTS.get(name)
     if module_name is None:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
@@ -39,5 +40,5 @@ def __getattr__(name):
     return value
 
 
-def __dir__():
+def __dir__() -> List[str]:
     return sorted(set(globals()) | set(_LAZY_IMPORTS))

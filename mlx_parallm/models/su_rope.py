@@ -1,5 +1,5 @@
 import math
-from typing import List, Union
+from typing import List, Tuple, Union
 
 import mlx.core as mx
 
@@ -56,7 +56,7 @@ class SuScaledRotaryEmbedding:
             / math.log(original_max_position_embeddings)
         )
 
-    def _get_cos_sin(self, offset, L):
+    def _get_cos_sin(self, offset: int, L: int) -> Tuple[mx.array, mx.array]:
         position_ids = mx.arange(offset, offset + L, dtype=mx.float32)
         inv_freq = (
             self.inv_freq_long
@@ -69,8 +69,8 @@ class SuScaledRotaryEmbedding:
         sin = mx.sin(emb) * self.scaling_factor
         return cos, sin
 
-    def __call__(self, x, offset: int = 0):
-        def _rotate_half(_x):
+    def __call__(self, x: mx.array, offset: int = 0) -> mx.array:
+        def _rotate_half(_x: mx.array) -> mx.array:
             midpoint = _x.shape[-1] // 2
             x1, x2 = _x[..., :midpoint], _x[..., midpoint:]
             return mx.concatenate([-x2, x1], axis=-1)

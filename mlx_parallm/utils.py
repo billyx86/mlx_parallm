@@ -9,7 +9,7 @@ import shutil
 import time
 from pathlib import Path
 from textwrap import dedent
-from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Union, Type
+from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Type, Union, cast
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -26,17 +26,17 @@ from mlx_lm.tokenizer_utils import TokenizerWrapper
 # current mlx-lm (CI caught this on the revamp branch).
 from mlx_lm.utils import load_tokenizer
 try:
-    from mlx_lm.lora import apply_lora_layers
+    from mlx_lm.lora import apply_lora_layers  # type: ignore[attr-defined]
 except ImportError:
     logging.warning("Could not import 'apply_lora_layers' from 'mlx_lm.lora'. LoRA adapter loading might fail.")
-    def apply_lora_layers(model, adapter_path):
+    def apply_lora_layers(model: nn.Module, adapter_path: str) -> nn.Module:
         raise NotImplementedError("LoRA adapter application function not found in installed mlx_lm version.")
 
 try:
-    from mlx_lm.tuner.utils import dequantize as dequantize_model
+    from mlx_lm.tuner.utils import dequantize as dequantize_model  # type: ignore[attr-defined]
 except ImportError:
     logging.warning("Could not import 'dequantize' from 'mlx_lm.tuner.utils'. The --dequantize conversion option will be unavailable.")
-    def dequantize_model(model):
+    def dequantize_model(model: nn.Module) -> nn.Module:
         raise NotImplementedError("Dequantization helper not found in installed mlx_lm version.")
 
 # Local imports
@@ -56,12 +56,12 @@ MAX_FILE_SIZE_GB = 5
 
 class ModelNotFoundError(Exception):
     """Custom exception for when a model is not found."""
-    def __init__(self, message):
+    def __init__(self, message: str) -> None:
         self.message = message
         super().__init__(self.message)
 
 
-def _get_classes(config: dict) -> Tuple[Type[nn.Module], Type[BaseModelArgs]]:
+def _get_classes(config: Dict[str, Any]) -> Tuple[Type[nn.Module], Type[BaseModelArgs]]:
     """Retrieve the model and model args classes based on the configuration."""
     model_type = config.get("model_type")
     if not model_type:
@@ -96,7 +96,9 @@ def get_model_path(path_or_hf_repo: str, revision: Optional[str] = None) -> Path
     if not model_path.exists():
         logging.info(f"Local path '{model_path}' not found. Attempting download from Hugging Face Hub: '{path_or_hf_repo}'")
         try:
-            download_path = snapshot_download(
+            # `local_dir_use_symlinks` was removed from hf-hub >= 1.0; the
+            # pinned >=0.20 runtime line still accepts it, so type-ignore.
+            download_path = snapshot_download(  # type: ignore[call-overload]
                 repo_id=path_or_hf_repo,
                 revision=revision,
                 allow_patterns=[
@@ -142,7 +144,13 @@ def apply_repetition_penalty(
     # take the unique ids in Python, and convert back to an mx.array. The token
     # count is tiny, so this sync is negligible next to the matmul.
     vocab_size = logits.shape[-1]
-    unique_ids = sorted({int(t) for t in generated_tokens.tolist() if 0 <= t < vocab_size})
+    unique_ids = sorted(
+        {
+            int(t)
+            for t in cast(List[int], generated_tokens.tolist())
+            if 0 <= t < vocab_size
+        }
+    )
     if not unique_ids:
         return logits
     unique_tokens = mx.array(unique_ids)
@@ -265,7 +273,7 @@ def stream_generate(
     tokenizer: TokenizerWrapper, # Expect TokenizerWrapper directly
     prompt: str,
     max_tokens: int = 100,
-    **kwargs,
+    **kwargs: Any,
 ) -> Generator[str, None, None]:
     """Generates text for a single prompt, yielding decoded segments."""
     prompt_tokens = mx.array(tokenizer.encode(prompt))[None]
@@ -316,7 +324,7 @@ def batch_generate(
     format_prompts: bool = True,
     return_full: bool = False,
     token_callback: Optional[Callable[[str, int], None]] = None,
-    **kwargs,
+    **kwargs: Any,
 ) -> Generator[List[Optional[str]], None, None]:
     """Generate responses for a batch of prompts, yielding results in a streaming manner using manual decoding.
 
@@ -382,7 +390,7 @@ def batch_generate(
     gen_time = 0.0
 
     # Track full token sequences and previously decoded text for manual streaming
-    full_token_ids = [[] for _ in range(batch_size)]
+    full_token_ids: List[List[int]] = [[] for _ in range(batch_size)]
     previous_texts = ["" for _ in range(batch_size)]
     eos_reached = [False] * batch_size
 
@@ -398,13 +406,13 @@ def batch_generate(
                 prompt_time = time.perf_counter() - tic
                 tic = time.perf_counter()
 
-            current_step_segments = [None] * batch_size
+            current_step_segments: List[Optional[str]] = [None] * batch_size
             any_active = False
 
             for i in range(batch_size):
                 if not eos_reached[i]:
                     any_active = True
-                    token_id = step_tokens_batch[i, 0].item()
+                    token_id = cast(int, step_tokens_batch[i, 0].item())
 
                     # Stop before adding EOS token to list for decoding
                     if token_id == tokenizer.eos_token_id:
@@ -488,7 +496,7 @@ def generate(
     max_tokens: int = 100,
     verbose: bool = False,
     formatter: Optional[Callable[[str, float], None]] = None,
-    **kwargs,
+    **kwargs: Any,
 ) -> str:
     """Generate a complete response string using stream_generate internally."""
     if not isinstance(tokenizer, TokenizerWrapper):
@@ -531,7 +539,7 @@ def generate(
     return final_text
 
 
-def load_config(model_path: Path) -> dict:
+def load_config(model_path: Path) -> Dict[str, Any]:
     """Loads the model configuration file (config.json)."""
     config_path = model_path / "config.json"
     if not config_path.is_file():
@@ -548,7 +556,7 @@ def load_config(model_path: Path) -> dict:
 def load_model(
     model_path: Path,
     lazy: bool = False,
-    model_config_overrides: dict = {},
+    model_config_overrides: Dict[str, Any] = {},
 ) -> nn.Module:
     """Load and initialize the MLX model from a local path."""
     config = load_config(model_path)
@@ -568,10 +576,10 @@ def load_model(
             raise FileNotFoundError(f"No weight files (*.safetensors) found in {model_path}")
 
     logging.info(f"Loading weights from: {weight_files}")
-    weights = {}
+    weights: Dict[str, mx.array] = {}
     for wf_path in weight_files:
         try:
-            weights.update(mx.load(wf_path))
+            weights.update(cast(Dict[str, mx.array], mx.load(wf_path)))
         except Exception as e:
              logging.error(f"Error loading weights from {wf_path}: {e}")
              raise RuntimeError(f"Failed to load weights from {wf_path}") from e
@@ -580,7 +588,8 @@ def load_model(
 
     try:
         model_args = model_args_class.from_dict(config)
-        model = model_class(model_args)
+        # Model classes take a ModelArgs positional arg (nn.Module.__init__ does not).
+        model = model_class(model_args)  # type: ignore[call-arg]
     except Exception as e:
         logging.error(f"Error initializing model {model_class.__name__}: {e}")
         raise ValueError("Failed to initialize model from config") from e
@@ -589,7 +598,8 @@ def load_model(
 
     if (quantization := config.get("quantization", None)) is not None:
         logging.info(f"Applying quantization config: {quantization}")
-        def class_predicate(p, m): return hasattr(m, "to_quantized") and f"{p}.scales" in weights
+        def class_predicate(p: str, m: nn.Module) -> bool:
+            return hasattr(m, "to_quantized") and f"{p}.scales" in weights
         try:
             nn.quantize(model, class_predicate=class_predicate, **quantization)
         except Exception as e:
@@ -615,7 +625,7 @@ def load_model(
 
 def load(
     path_or_hf_repo: str,
-    model_config_overrides: dict = {},
+    model_config_overrides: Dict[str, Any] = {},
     adapter_path: Optional[str] = None,
     lazy: bool = False,
 ) -> Tuple[nn.Module, TokenizerWrapper]:
@@ -659,7 +669,7 @@ def load(
 
 def fetch_from_hub(
     model_path: Path, lazy: bool = False
-) -> Tuple[nn.Module, dict, TokenizerWrapper]:
+) -> Tuple[nn.Module, Dict[str, Any], TokenizerWrapper]:
     """Fetches model, config, and tokenizer from a local path."""
     if not model_path.is_dir():
         raise FileNotFoundError(f"Provided model path is not a directory: {model_path}")
@@ -672,8 +682,9 @@ def fetch_from_hub(
 def make_shards(weights: Dict[str, mx.array], max_file_size_gb: int = MAX_FILE_SIZE_GB) -> List[Dict[str, mx.array]]:
     """Splits model weights into shards based on size."""
     max_bytes = max_file_size_gb << 30
-    shards = []
-    current_shard, current_size = {}, 0
+    shards: List[Dict[str, mx.array]] = []
+    current_shard: Dict[str, mx.array] = {}
+    current_size = 0
     for k, v in sorted(weights.items()):
         v_size = v.nbytes
         if current_size + v_size > max_bytes and current_size > 0:
@@ -686,7 +697,7 @@ def make_shards(weights: Dict[str, mx.array], max_file_size_gb: int = MAX_FILE_S
     return shards
 
 
-def upload_to_hub(path: str, upload_repo: str, hf_path: Optional[str] = None):
+def upload_to_hub(path: str, upload_repo: str, hf_path: Optional[str] = None) -> None:
     """Uploads model files from local path to Hugging Face Hub."""
     import os
     from huggingface_hub import ModelCard, logging as hf_logging
@@ -701,7 +712,12 @@ def upload_to_hub(path: str, upload_repo: str, hf_path: Optional[str] = None):
          try: card = ModelCard.load(hf_path)
          except Exception:
              logging.warning(f"Could not load card from '{hf_path}'. Creating generic card.")
-             card = ModelCard.from_template(card_data={"library_name": "mlx", "tags": ["mlx"]}, model_id=upload_repo)
+             # card_data is typed as ModelCardData in hf-hub stubs; a plain
+             # dict is accepted at runtime.
+             card = ModelCard.from_template(
+                 card_data={"library_name": "mlx", "tags": ["mlx"]},  # type: ignore[arg-type]
+                 model_id=upload_repo,
+             )
          card.data.tags = list(set((card.data.tags or []) + ["mlx"]))
 
          try: from mlx_lm import __version__ as mlx_lm_version
@@ -732,7 +748,9 @@ def upload_to_hub(path: str, upload_repo: str, hf_path: Optional[str] = None):
         logging.info(f"Creating/checking Hub repository: '{upload_repo}'")
         repo_url_obj = api.create_repo(repo_id=upload_repo, repo_type="model", exist_ok=True)
         logging.info(f"Uploading files from '{local_path}' to '{repo_url_obj.repo_id}'...")
-        api.upload_folder(
+        # multi_commits* keywords were dropped in hf-hub >= 1.0; still
+        # accepted (and desirable) on the pinned >=0.20 runtime line.
+        api.upload_folder(  # type: ignore[call-overload]
             folder_path=str(local_path), repo_id=upload_repo, repo_type="model",
             commit_message="Upload MLX model", multi_commits=True, multi_commits_verbose=True,
         )
@@ -752,7 +770,10 @@ def save_weights(
     shards = make_shards(weights)
     shards_count = len(shards)
     shard_format = "model-{:05d}-of-{:05d}.safetensors" if shards_count > 1 else "model.safetensors"
-    index_data = {"metadata": {"total_size": sum(v.nbytes for v in weights.values())}, "weight_map": {}}
+    index_data: Dict[str, Any] = {
+        "metadata": {"total_size": sum(v.nbytes for v in weights.values())},
+        "weight_map": {},
+    }
 
     logging.info(f"Saving {shards_count} weight shard(s) to {save_path}...")
     for i, shard_weights in enumerate(shards):
@@ -764,7 +785,7 @@ def save_weights(
         except Exception as e:
             logging.error(f"Error saving shard {shard_name}: {e}")
             raise RuntimeError(f"Failed to save shard {shard_name}") from e
-        if donate_weights: shards[i] = None; del shard_weights
+        if donate_weights: shard_weights.clear()
 
     if shards_count > 1:
         index_path = save_path / "model.safetensors.index.json"
@@ -781,8 +802,8 @@ def save_weights(
 
 
 def quantize_model(
-    model: nn.Module, config: dict, q_group_size: int, q_bits: int
-) -> Tuple[Dict[str, mx.array], dict]:
+    model: nn.Module, config: Dict[str, Any], q_group_size: int, q_bits: int
+) -> Tuple[Dict[str, mx.array], Dict[str, Any]]:
     """Applies quantization and returns quantized weights and updated config."""
     logging.info(f"Quantizing model: group_size={q_group_size}, bits={q_bits}")
     quantized_config = copy.deepcopy(config)
@@ -798,7 +819,7 @@ def quantize_model(
 
 
 def save_config(
-    config: dict, config_path: Union[str, Path]
+    config: Dict[str, Any], config_path: Union[str, Path]
 ) -> None:
     """Saves the model configuration dictionary to config.json."""
     config_path = Path(config_path)
@@ -813,11 +834,11 @@ def save_config(
 
 
 def convert(
-    hf_path: str, mlx_path: str = "mlx_model", quantize: bool = False,
+    hf_path: str, mlx_path: Union[str, Path] = "mlx_model", quantize: bool = False,
     q_group_size: int = 64, q_bits: int = 4, dtype: str = "float16",
     upload_repo: Optional[str] = None, revision: Optional[str] = None,
     dequantize: bool = False
-):
+) -> None:
     """Converts HF model to MLX, optionally processes, saves, and uploads."""
     if quantize and dequantize: raise ValueError("Cannot set both quantize and dequantize.")
 
@@ -842,7 +863,8 @@ def convert(
         try:
             model = load_model(model_path, lazy=False) # Need evaluated params
             model = dequantize_model(model)
-            weights = {k: v.astype(mx.float16) for k, v in tree_flatten(model.parameters())}
+            flat_params = cast(List[Tuple[str, mx.array]], tree_flatten(model.parameters()))
+            weights = {k: v.astype(mx.float16) for k, v in flat_params}
             config.pop("quantization", None)
             logging.info("Dequantization complete (float16).")
         except Exception as e: raise RuntimeError("Dequantization failed") from e
@@ -858,7 +880,8 @@ def convert(
         try: target_dtype = getattr(mx, dtype)
         except AttributeError: raise ValueError(f"Invalid dtype: {dtype}")
         mx.eval(model.parameters()) # Ensure loaded
-        weights = {k: v.astype(target_dtype) for k, v in tree_flatten(model.parameters())}
+        flat_params = cast(List[Tuple[str, mx.array]], tree_flatten(model.parameters()))
+        weights = {k: v.astype(target_dtype) for k, v in flat_params}
         logging.info(f"Weights converted to {dtype}.")
 
     del model; import gc; gc.collect(); logging.info("Model instance deleted.")

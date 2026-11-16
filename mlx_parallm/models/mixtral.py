@@ -1,11 +1,11 @@
 import math
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple, Union
+from typing import Dict, List, Optional, Union
 
 import mlx.core as mx
 import mlx.nn as nn
 
-from mlx_parallm.models.base import BaseModelArgs
+from mlx_parallm.models.base import BaseModelArgs, BatchedKVCache
 from .switch_layers import SwitchGLU
 
 
@@ -25,7 +25,7 @@ class ModelArgs(BaseModelArgs):
     rope_traditional: bool = False
     rope_scaling: Optional[Dict[str, Union[float, str]]] = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.num_key_value_heads is None:
             self.num_key_value_heads = self.num_attention_heads
 
@@ -64,7 +64,7 @@ class MixtralAttention(nn.Module):
         self,
         x: mx.array,
         mask: Optional[mx.array] = None,
-        cache: Optional[Tuple[mx.array, mx.array]] = None,
+        cache: Optional[BatchedKVCache] = None,
     ) -> mx.array:
         B, L, D = x.shape
 
@@ -136,7 +136,7 @@ class MixtralDecoderLayer(nn.Module):
         self,
         x: mx.array,
         mask: Optional[mx.array] = None,
-        cache: Optional[Tuple[mx.array, mx.array]] = None,
+        cache: Optional[BatchedKVCache] = None,
     ) -> mx.array:
         r = self.self_attn(self.input_layernorm(x), mask, cache)
         h = x + r
@@ -160,8 +160,8 @@ class MixtralModel(nn.Module):
     def __call__(
         self,
         inputs: mx.array,
-        cache=None,
-    ):
+        cache: Optional[List[Optional[BatchedKVCache]]] = None,
+    ) -> mx.array:
         h = self.embed_tokens(inputs)
 
         mask = None
@@ -190,12 +190,12 @@ class Model(nn.Module):
     def __call__(
         self,
         inputs: mx.array,
-        cache=None,
-    ):
+        cache: Optional[List[Optional[BatchedKVCache]]] = None,
+    ) -> mx.array:
         out = self.model(inputs, cache)
         return self.lm_head(out)
 
-    def sanitize(self, weights):
+    def sanitize(self, weights: Dict[str, mx.array]) -> Dict[str, mx.array]:
         if "model.layers.0.block_sparse_moe.experts.0.w1.weight" not in weights:
             return weights
         for l in range(self.args.num_hidden_layers):
@@ -215,13 +215,13 @@ class Model(nn.Module):
         return weights
 
     @property
-    def layers(self):
+    def layers(self) -> List[MixtralDecoderLayer]:
         return self.model.layers
 
     @property
-    def head_dim(self):
+    def head_dim(self) -> int:
         return self.args.hidden_size // self.args.num_attention_heads
 
     @property
-    def n_kv_heads(self):
+    def n_kv_heads(self) -> int:
         return self.args.num_key_value_heads

@@ -24,3 +24,23 @@ jobs:
 
       - name: Run unit tests
         run: python -m pytest -v
+
+  typecheck:
+    # mypy itself is pure Python, but it reads the ML stack's type info
+    # (mlx, mlx-lm, transformers, hf-hub) from the installed packages, and
+    # those only ship real wheels for Apple Silicon. So this runs on the
+    # same macOS runner as the tests.
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package (with dev extras)
+        run: pip install -e ".[dev]"
+
+      - name: Run mypy
+        run: python -m mypy

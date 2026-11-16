@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple, Union
+from typing import Dict, List, Optional, Union
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -24,7 +24,7 @@ class ModelArgs(BaseModelArgs):
     rope_scaling: Optional[Dict[str, Union[float, str]]] = None
     tie_word_embeddings: bool = True
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.num_key_value_heads is None:
             self.num_key_value_heads = self.num_attention_heads
 
@@ -43,7 +43,7 @@ class Attention(nn.Module):
 
         dim = args.hidden_size
         self.n_heads = n_heads = args.num_attention_heads
-        self.n_kv_heads = n_kv_heads = args.num_key_value_heads
+        self.n_kv_heads = n_kv_heads = args.num_key_value_heads or args.num_attention_heads
 
         head_dim = args.hidden_size // n_heads
         self.scale = head_dim**-0.5
@@ -58,7 +58,7 @@ class Attention(nn.Module):
         self.o_proj = nn.Linear(n_heads * head_dim, dim, bias=attention_bias)
 
         rope_scale = (
-            1 / args.rope_scaling["factor"]
+            1 / float(args.rope_scaling["factor"])
             if args.rope_scaling is not None and args.rope_scaling["type"] == "linear"
             else 1
         )
@@ -114,7 +114,7 @@ class MLP(nn.Module):
         self.down_proj = nn.Linear(hidden_dim, dim, bias=mlp_bias)
         self.up_proj = nn.Linear(dim, hidden_dim, bias=mlp_bias)
 
-    def __call__(self, x) -> mx.array:
+    def __call__(self, x: mx.array) -> mx.array:
         return self.down_proj(nn.silu(self.gate_proj(x)) * self.up_proj(x))
 
 
@@ -160,14 +160,14 @@ class LlamaModel(nn.Module):
     def __call__(
         self,
         inputs: mx.array,
-        cache=None,
-    ):
+        cache: Optional[List[Optional[BatchedKVCache]]] = None,
+    ) -> mx.array:
         h = self.embed_tokens(inputs)
 
         mask = None
         if h.shape[1] > 1:
             mask = create_additive_causal_mask(
-                h.shape[1], cache[0].offset if cache is not None else 0
+                h.shape[1], cache[0].offset if cache is not None and cache[0] is not None else 0
             )
             mask = mask.astype(h.dtype)
 
@@ -192,8 +192,8 @@ class Model(nn.Module):
     def __call__(
         self,
         inputs: mx.array,
-        cache=None,
-    ):
+        cache: Optional[List[Optional[BatchedKVCache]]] = None,
+    ) -> mx.array:
         out = self.model(inputs, cache)
         if self.args.tie_word_embeddings:
             out = self.model.embed_tokens.as_linear(out)
@@ -201,20 +201,20 @@ class Model(nn.Module):
             out = self.lm_head(out)
         return out
 
-    def sanitize(self, weights):
+    def sanitize(self, weights: Dict[str, mx.array]) -> Dict[str, mx.array]:
         # Remove unused precomputed rotary freqs
         return {
             k: v for k, v in weights.items() if "self_attn.rotary_emb.inv_freq" not in k
         }
 
     @property
-    def layers(self):
+    def layers(self) -> List[TransformerBlock]:
         return self.model.layers
 
     @property
-    def head_dim(self):
+    def head_dim(self) -> int:
         return self.args.hidden_size // self.args.num_attention_heads
 
     @property
-    def n_kv_heads(self):
-        return self.args.num_key_value_heads
+    def n_kv_heads(self) -> int:
+        return self.args.num_key_value_heads or self.args.num_attention_heads

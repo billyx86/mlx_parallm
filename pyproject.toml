@@ -28,3 +28,46 @@ line-length = 100
 
 [tool.ruff]
 line-length = 100
+
+[tool.mypy]
+# Strict type gate (issue #4). The ML stack (mlx, mlx-lm, transformers,
+# huggingface_hub) exposes no type information the way we consume it, so
+# those imports resolve to `Any`; every strict guarantee applies to the
+# code in this package.
+python_version = "3.12"
+strict = true
+files = ["mlx_parallm"]
+# `mlx.nn` is a star-import re-export facade (`from mlx.nn.layers import *`
+# with no `__all__`); strict's no_implicit_reexport would mark every
+# `nn.Module` / `nn.Linear` / ... attribute as unresolvable. mlx ships
+# py.typed and these are genuine public exports, so implicit re-export is
+# the correct interpretation here.
+no_implicit_reexport = false
+# We follow the MLX / transformers / hf-hub types (they ship py.typed) so
+# that real type bugs in *our* code are still caught, but a large share of
+# the boundary surface is untyped Python whose signatures shift between
+# releases. `strict`'s disallow_untyped_calls would flag every call into
+# that untyped surface (e.g. ``mx.async_eval``, ``Module.parameters``,
+# ``snapshot_download``); relax just that one flag. All other strict checks
+# keep applying to the code in this package.
+disallow_untyped_calls = false
+
+[[tool.mypy.overrides]]
+module = [
+    "mlx", "mlx.*",
+    "mlx_lm", "mlx_lm.*",
+    "transformers", "transformers.*",
+    "huggingface_hub", "huggingface_hub.*",
+]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Where an untyped MLX call returns `Any`, strict's warn_return_any would
+# flag every MLX-facing return. Relax that single flag for the MLX-facing
+# modules; all other strict checks stay on.
+module = [
+    "mlx_parallm.utils",
+    "mlx_parallm.sample_utils",
+    "mlx_parallm.models.*",
+]
+warn_return_any = false

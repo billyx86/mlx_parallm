@@ -1,6 +1,6 @@
 import inspect
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Union, cast
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -20,11 +20,11 @@ class ModelArgs(BaseModelArgs):
     num_key_value_heads: Optional[int] = None
     rope_theta: float = 10000
     rope_traditional: bool = False
-    rope_scaling: Optional[Dict[str, Union[float, List[float]]]] = None
+    rope_scaling: Optional[Dict[str, Union[float, List[float], str]]] = None
     max_position_embeddings: int = 131072
     original_max_position_embeddings: int = 4096
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.num_key_value_heads is None:
             self.num_key_value_heads = self.num_attention_heads
 
@@ -58,6 +58,9 @@ class Attention(nn.Module):
         self.o_proj = nn.Linear(n_heads * head_dim, dim, bias=False)
 
         rope_scale = 1.0
+        # Either the Su-extended embedding (long-context phi-3) or the
+        # standard RoPE; both expose the same __call__(x, offset) protocol.
+        self.rope: Union[SuScaledRotaryEmbedding, nn.RoPE]
         if args.rope_scaling and args.rope_scaling["type"] == "su":
             self.rope = SuScaledRotaryEmbedding(
                 head_dim,
@@ -66,8 +69,12 @@ class Attention(nn.Module):
                 scale=rope_scale,
                 max_position_embeddings=args.max_position_embeddings,
                 original_max_position_embeddings=args.original_max_position_embeddings,
-                short_factor=args.rope_scaling["short_factor"],
-                long_factor=args.rope_scaling["long_factor"],
+                short_factor=cast(
+                    Union[float, List[float]], args.rope_scaling["short_factor"]
+                ),
+                long_factor=cast(
+                    Union[float, List[float]], args.rope_scaling["long_factor"]
+                ),
             )
         else:
             if args.rope_scaling and args.rope_scaling["type"] == "linear":
@@ -115,12 +122,12 @@ class Attention(nn.Module):
 
 
 class MLP(nn.Module):
-    def __init__(self, dim, hidden_dim):
+    def __init__(self, dim: int, hidden_dim: int) -> None:
         super().__init__()
         self.gate_up_proj = nn.Linear(dim, 2 * hidden_dim, bias=False)
         self.down_proj = nn.Linear(hidden_dim, dim, bias=False)
 
-    def __call__(self, x) -> mx.array:
+    def __call__(self, x: mx.array) -> mx.array:
         x = self.gate_up_proj(x)
         gate, x = mx.split(x, 2, axis=-1)
         return self.down_proj(nn.silu(gate) * x)
@@ -168,8 +175,8 @@ class Phi3Model(nn.Module):
     def __call__(
         self,
         inputs: mx.array,
-        cache=None,
-    ):
+        cache: Optional[List[Optional[BatchedKVCache]]] = None,
+    ) -> mx.array:
         h = self.embed_tokens(inputs)
 
         mask = None
@@ -197,19 +204,19 @@ class Model(nn.Module):
     def __call__(
         self,
         inputs: mx.array,
-        cache=None,
-    ):
+        cache: Optional[List[Optional[BatchedKVCache]]] = None,
+    ) -> mx.array:
         out = self.model(inputs, cache)
         return self.lm_head(out)
 
     @property
-    def layers(self):
+    def layers(self) -> List[TransformerBlock]:
         return self.model.layers
 
     @property
-    def head_dim(self):
+    def head_dim(self) -> int:
         return self.args.hidden_size // self.args.num_attention_heads
 
     @property
-    def n_kv_heads(self):
-        return self.args.num_key_value_heads
+    def n_kv_heads(self) -> int:
+        return self.args.num_key_value_heads or self.args.num_attention_heads
