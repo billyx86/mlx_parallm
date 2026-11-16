@@ -1,10 +1,10 @@
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import List, Optional
 
 import mlx.core as mx
 import mlx.nn as nn
 
-from .base import BaseModelArgs
+from .base import BaseModelArgs, BatchedKVCache
 
 @dataclass
 class ModelArgs(BaseModelArgs):
@@ -20,6 +20,9 @@ class ModelArgs(BaseModelArgs):
     rope_theta: float = 10000
     rope_traditional: bool = False
 
+    def __post_init__(self) -> None:
+        pass
+
 
 class RMSNorm(nn.Module):
     def __init__(self, dims: int, eps: float = 1e-5):
@@ -27,7 +30,7 @@ class RMSNorm(nn.Module):
         self.weight = mx.ones((dims,))
         self.eps = eps
 
-    def __call__(self, x):
+    def __call__(self, x: mx.array) -> mx.array:
         return mx.fast.rms_norm(x, 1.0 + self.weight, self.eps)
 
 
@@ -57,7 +60,7 @@ class Attention(nn.Module):
         self,
         x: mx.array,
         mask: Optional[mx.array] = None,
-        cache: Optional[Tuple[mx.array, mx.array]] = None,
+        cache: Optional[BatchedKVCache] = None,
     ) -> mx.array:
         B, L, D = x.shape
 
@@ -85,13 +88,13 @@ class Attention(nn.Module):
 
 
 class MLP(nn.Module):
-    def __init__(self, dim, hidden_dim):
+    def __init__(self, dim: int, hidden_dim: int) -> None:
         super().__init__()
         self.gate_proj = nn.Linear(dim, hidden_dim, bias=False)
         self.down_proj = nn.Linear(hidden_dim, dim, bias=False)
         self.up_proj = nn.Linear(dim, hidden_dim, bias=False)
 
-    def __call__(self, x) -> mx.array:
+    def __call__(self, x: mx.array) -> mx.array:
         return self.down_proj(nn.gelu(self.gate_proj(x)) * self.up_proj(x))
 
 
@@ -110,7 +113,7 @@ class TransformerBlock(nn.Module):
         self,
         x: mx.array,
         mask: Optional[mx.array] = None,
-        cache: Optional[Tuple[mx.array, mx.array]] = None,
+        cache: Optional[BatchedKVCache] = None,
     ) -> mx.array:
         r = self.self_attn(self.input_layernorm(x), mask, cache)
         h = x + r
@@ -135,8 +138,8 @@ class GemmaModel(nn.Module):
     def __call__(
         self,
         inputs: mx.array,
-        cache=None,
-    ):
+        cache: Optional[List[Optional[BatchedKVCache]]] = None,
+    ) -> mx.array:
         h = self.embed_tokens(inputs)
         h = h * (self.args.hidden_size**0.5)
 
@@ -164,20 +167,20 @@ class Model(nn.Module):
     def __call__(
         self,
         inputs: mx.array,
-        cache=None,
-    ):
+        cache: Optional[List[Optional[BatchedKVCache]]] = None,
+    ) -> mx.array:
         out = self.model(inputs, cache)
         out = self.model.embed_tokens.as_linear(out)
         return out
 
     @property
-    def layers(self):
+    def layers(self) -> List[TransformerBlock]:
         return self.model.layers
 
     @property
-    def head_dim(self):
+    def head_dim(self) -> int:
         return self.args.head_dim
 
     @property
-    def n_kv_heads(self):
+    def n_kv_heads(self) -> int:
         return self.args.num_key_value_heads

@@ -1,4 +1,5 @@
 import math
+from typing import Any, Callable
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -36,25 +37,26 @@ class QuantizedSwitchLinear(nn.Module):
         # Freeze this model's parameters
         self.freeze()
 
-    def unfreeze(self, *args, **kwargs):
+    def unfreeze(self, **kwargs: Any) -> nn.Module:
         """Wrap unfreeze so that we unfreeze any layers we might contain but
         our parameters will remain frozen."""
-        super().unfreeze(*args, **kwargs)
+        super().unfreeze(**kwargs)
         self.freeze(recurse=False)
+        return self
 
     @property
-    def input_dims(self):
+    def input_dims(self) -> int:
         return self.scales.shape[2] * self.group_size
 
     @property
-    def output_dims(self):
+    def output_dims(self) -> int:
         return self.weight.shape[1]
 
     @property
-    def num_experts(self):
+    def num_experts(self) -> int:
         return self.weight.shape[0]
 
-    def __call__(self, x, indices):
+    def __call__(self, x: mx.array, indices: mx.array) -> mx.array:
         x = mx.gather_qmm(
             x,
             self["weight"],
@@ -86,24 +88,24 @@ class SwitchLinear(nn.Module):
             self.bias = mx.zeros((num_experts, output_dims))
 
     @property
-    def input_dims(self):
+    def input_dims(self) -> int:
         return self.weight.shape[2]
 
     @property
-    def output_dims(self):
+    def output_dims(self) -> int:
         return self.weight.shape[1]
 
     @property
-    def num_experts(self):
+    def num_experts(self) -> int:
         return self.weight.shape[0]
 
-    def __call__(self, x, indices):
+    def __call__(self, x: mx.array, indices: mx.array) -> mx.array:
         x = mx.gather_mm(x, self["weight"].swapaxes(-1, -2), rhs_indices=indices)
         if "bias" in self:
             x = x + mx.expand_dims(self["bias"][indices], -2)
         return x
 
-    def to_quantized(self, group_size: int = 64, bits: int = 4):
+    def to_quantized(self, group_size: int = 64, bits: int = 4) -> "QuantizedSwitchLinear":
         num_experts, output_dims, input_dims = self.weight.shape
         ql = QuantizedSwitchLinear(
             input_dims, output_dims, num_experts, False, group_size, bits
@@ -120,7 +122,7 @@ class SwitchGLU(nn.Module):
         input_dims: int,
         hidden_dims: int,
         num_experts: int,
-        activation=nn.silu,
+        activation: Callable[[mx.array], mx.array] = nn.silu,
         bias: bool = False,
     ):
         super().__init__()
@@ -130,7 +132,7 @@ class SwitchGLU(nn.Module):
         self.down_proj = SwitchLinear(hidden_dims, input_dims, num_experts, bias=bias)
         self.activation = activation
 
-    def __call__(self, x, indices) -> mx.array:
+    def __call__(self, x: mx.array, indices: mx.array) -> mx.array:
         x = mx.expand_dims(x, (-2, -3))
 
         x_up = self.up_proj(x, indices)
@@ -146,7 +148,7 @@ class SwitchMLP(nn.Module):
         input_dims: int,
         hidden_dims: int,
         num_experts: int,
-        activation=nn.gelu_approx,
+        activation: Callable[[mx.array], mx.array] = nn.gelu_approx,
         bias: bool = False,
     ):
         super().__init__()
@@ -155,7 +157,7 @@ class SwitchMLP(nn.Module):
         self.fc2 = SwitchLinear(hidden_dims, input_dims, num_experts, bias=bias)
         self.activation = activation
 
-    def __call__(self, x, indices) -> mx.array:
+    def __call__(self, x: mx.array, indices: mx.array) -> mx.array:
         x = mx.expand_dims(x, (-2, -3))
 
         x = self.fc1(x, indices)
