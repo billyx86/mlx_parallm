@@ -8,8 +8,15 @@ This repo heavily borrows from [`mlx_lm`](https://github.com/ml-explore/mlx-exam
 
 ## Quick start
 
+> **Apple Silicon only.** MLX ships arm64 wheels exclusively, so this runs on
+> macOS with an Apple chip — not on Linux, Intel Macs, or Windows.
+>
+> `mlx-parallm` is **not published to PyPI**, so install from the repository:
+
 ```bash
-pip install mlx-parallm
+git clone https://github.com/billyx86/mlx_parallm.git
+cd mlx_parallm
+pip install -e .            # runtime only — add ".[dev]" for the dev extras
 ```
 
 ```python
